@@ -14,49 +14,34 @@ function initAnalytics()
 
 $(function()
 {
-	var emptyInputMsg = "Paste YAML here";
-	var emptyOutputMsg = "Go will appear here";
-	var formattedEmptyInputMsg = '<span style="color: #777;">'+emptyInputMsg+'</span>';
-	var formattedEmptyOutputMsg = '<span style="color: #777;">'+emptyOutputMsg+'</span>';
+	const emptyInputMsg = "Paste YAML here";
+	const emptyOutputMsg = "Go will appear here";
+	const formattedEmptyInputMsg = '<span style="color: #777;">'+emptyInputMsg+'</span>';
+	const formattedEmptyOutputMsg = '<span style="color: #777;">'+emptyOutputMsg+'</span>';
 
-	// Hides placeholder text
-	$('#input').on('focus', function()
+	function doConversion()
 	{
-		var val = $(this).text();
-		if (!val)
-		{
-			$(this).html(formattedEmptyInputMsg);
-			$('#output').html(formattedEmptyOutputMsg);
-		}
-		else if (val == emptyInputMsg)
-			$(this).html("");
-	});
-
-	// Shows placeholder text
-	$('#input').on('blur', function()
-	{
-		var val = $(this).text();
-		if (!val)
-		{
-			$(this).html(formattedEmptyInputMsg);
-			$('#output').html(formattedEmptyOutputMsg);
-		}
-	}).blur();
-
-	// Automatically do the conversion
-	$('#input').keyup(function()
-	{
-		var input = $(this).text();
-		if (!input)
+		var input = $('#input').val().trim();
+		if (!input || input == emptyInputMsg)
 		{
 			$('#output').html(formattedEmptyOutputMsg);
 			return;
 		}
 
-		var output = yamlToGo(input);
+		let output = yamlToGo(input, $('#struct').val().trim(), !$('#inline').is(':checked'), false);
 
 		if (output.error)
+		{
 			$('#output').html('<span class="clr-red">'+output.error+'</span>');
+			console.log("ERROR:", output, output.error);
+			var parsedError = output.error.match(/Unexpected token .+ in YAML at position (\d+)/);
+			if (parsedError) {
+				try {
+					var faultyIndex = parsedError.length == 2 && parsedError[1] && parseInt(parsedError[1]);
+					faultyIndex && $('#output').html(constructJSONErrorHTML(output.error, faultyIndex, input));
+				} catch(e) {}
+			}
+		}
 		else
 		{
 			var finalOutput = output.go;
@@ -65,7 +50,53 @@ $(function()
 			var coloredOutput = hljs.highlight("go", finalOutput);
 			$('#output').html(coloredOutput.value);
 		}
+	}
+
+	// Hides placeholder text
+	$('#input').on('focus', function()
+	{
+		var val = $(this).val();
+		if (!val)
+		{
+			$(this).val(emptyInputMsg);
+			$('#output').html(formattedEmptyOutputMsg);
+		}
+		else if (val == emptyInputMsg)
+			$(this).val("");
 	});
+
+	// Shows placeholder text
+	$('#input').on('blur', function()
+	{
+		var val = $(this).val();
+		if (!val)
+		{
+			$(this).val(emptyInputMsg);
+			$('#output').html(formattedEmptyOutputMsg);
+		}
+	}).blur();
+
+	// If tab is pressed, insert a tab instead of focusing on next element
+	$('#input').keydown(function(e)
+	{
+		if (e.keyCode == 9)
+		{
+			document.execCommand('insertHTML', false, '&#009'); // insert tab
+			e.preventDefault(); // don't go to next element
+		}
+	});
+
+	// Automatically do the conversion on paste or change
+	$('#input').keyup(function()
+	{
+		doConversion();
+	});
+
+	// Also do conversion when inlining preference changes
+	$('#inline').change(function()
+	{
+		doConversion();
+	})
 
 	// Highlights the output for the user
 	$('#output').click(function()
@@ -86,14 +117,14 @@ $(function()
 		}
 	});
 
-	// Fill in sample data if the user wants to see an example
+	// Fill in sample JSON if the user wants to see an example
 	$('#sample1').click(function()
 	{
-		$('#input').text(stringify(sample1)).keyup();
+		$('#input').val(sampleYaml1).keyup();
 	});
 	$('#sample2').click(function()
 	{
-		$('#input').text(stringify(sample2)).keyup();
+		$('#input').val(sampleYaml2).keyup();
 	});
 
 	var dark = false;
@@ -110,283 +141,102 @@ $(function()
 		}
 		dark = !dark;
 	});
+
+	// Copy contents of the output to clipboard
+	$("#copy-btn").click(function() {
+		var elm = document.getElementById("output");
+
+		if(document.body.createTextRange) {
+			// for ie
+			var range = document.body.createTextRange();
+
+			range.moveToElementText(elm);
+			range.select();
+
+			document.execCommand("Copy");
+		} else if(window.getSelection) {
+			// other browsers
+			var selection = window.getSelection();
+			var range = document.createRange();
+
+			range.selectNodeContents(elm);
+			selection.removeAllRanges();
+			selection.addRange(range);
+
+			document.execCommand("Copy");
+		}
+	})
 });
 
-// Stringifies YAML in the preferred manner
-function stringify(s)
-{
-	return YAML.stringify(s, 4);
+function constructJSONErrorHTML(rawErrorMessage, errorIndex, json) {
+	var errorHeading = '<p><span class="clr-red">'+ rawErrorMessage +'</span><p>';
+	var markedPart = '<span class="json-go-faulty-char">' + json[errorIndex] + '</span>';
+	var markedJsonString = [json.slice(0, errorIndex), markedPart, json.slice(errorIndex+1)].join('');
+	var jsonStringLines = markedJsonString.split(/\n/);
+	for(var i = 0; i < jsonStringLines.length; i++) {
+
+		if(jsonStringLines[i].indexOf('<span class="json-go-faulty-char">') > -1)  // faulty line
+			var wrappedLine = '<div class="faulty-line">' + jsonStringLines[i] + '</div>';
+		else 
+			var wrappedLine = '<div>' + jsonStringLines[i] + '</div>';
+
+		jsonStringLines[i] = wrappedLine;
+	}
+	return (errorHeading + jsonStringLines.join(''));
 }
 
-
-// From the SmartyStreets API
-var sample1 = [
-	{
-		"input_index": 0,
-		"candidate_index": 0,
-		"delivery_line_1": "1 N Rosedale St",
-		"last_line": "Baltimore MD 21229-3737",
-		"delivery_point_barcode": "212293737013",
-		"components": {
-			"primary_number": "1",
-			"street_predirection": "N",
-			"street_name": "Rosedale",
-			"street_suffix": "St",
-			"city_name": "Baltimore",
-			"state_abbreviation": "MD",
-			"zipcode": "21229",
-			"plus4_code": "3737",
-			"delivery_point": "01",
-			"delivery_point_check_digit": "3"
-		},
-		"metadata": {
-			"record_type": "S",
-			"zip_type": "Standard",
-			"county_fips": "24510",
-			"county_name": "Baltimore City",
-			"carrier_route": "C047",
-			"congressional_district": "07",
-			"rdi": "Residential",
-			"elot_sequence": "0059",
-			"elot_sort": "A",
-			"latitude": 39.28602,
-			"longitude": -76.6689,
-			"precision": "Zip9",
-			"time_zone": "Eastern",
-			"utc_offset": -5,
-			"dst": true
-		},
-		"analysis": {
-			"dpv_match_code": "Y",
-			"dpv_footnotes": "AABB",
-			"dpv_cmra": "N",
-			"dpv_vacant": "N",
-			"active": "Y"
-		}
-	},
-	{
-		"input_index": 0,
-		"candidate_index": 1,
-		"delivery_line_1": "1 S Rosedale St",
-		"last_line": "Baltimore MD 21229-3739",
-		"delivery_point_barcode": "212293739011",
-		"components": {
-			"primary_number": "1",
-			"street_predirection": "S",
-			"street_name": "Rosedale",
-			"street_suffix": "St",
-			"city_name": "Baltimore",
-			"state_abbreviation": "MD",
-			"zipcode": "21229",
-			"plus4_code": "3739",
-			"delivery_point": "01",
-			"delivery_point_check_digit": "1"
-		},
-		"metadata": {
-			"record_type": "S",
-			"zip_type": "Standard",
-			"county_fips": "24510",
-			"county_name": "Baltimore City",
-			"carrier_route": "C047",
-			"congressional_district": "07",
-			"rdi": "Residential",
-			"elot_sequence": "0064",
-			"elot_sort": "A",
-			"latitude": 39.2858,
-			"longitude": -76.66889,
-			"precision": "Zip9",
-			"time_zone": "Eastern",
-			"utc_offset": -5,
-			"dst": true
-		},
-		"analysis": {
-			"dpv_match_code": "Y",
-			"dpv_footnotes": "AABB",
-			"dpv_cmra": "N",
-			"dpv_vacant": "N",
-			"active": "Y"
-		}
-	}
-];
-
-
-// From the GitHub API
-var sample2 = {
-	"id": 1296269,
-	"owner": {
-		"login": "octocat",
-		"id": 1,
-		"avatar_url": "https://github.com/images/error/octocat_happy.gif",
-		"gravatar_id": "somehexcode",
-		"url": "https://api.github.com/users/octocat",
-		"html_url": "https://github.com/octocat",
-		"followers_url": "https://api.github.com/users/octocat/followers",
-		"following_url": "https://api.github.com/users/octocat/following{/other_user}",
-		"gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
-		"starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
-		"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
-		"organizations_url": "https://api.github.com/users/octocat/orgs",
-		"repos_url": "https://api.github.com/users/octocat/repos",
-		"events_url": "https://api.github.com/users/octocat/events{/privacy}",
-		"received_events_url": "https://api.github.com/users/octocat/received_events",
-		"type": "User",
-		"site_admin": false
-	},
-	"name": "Hello-World",
-	"full_name": "octocat/Hello-World",
-	"description": "This your first repo!",
-	"private": false,
-	"fork": false,
-	"url": "https://api.github.com/repos/octocat/Hello-World",
-	"html_url": "https://github.com/octocat/Hello-World",
-	"clone_url": "https://github.com/octocat/Hello-World.git",
-	"git_url": "git://github.com/octocat/Hello-World.git",
-	"ssh_url": "git@github.com:octocat/Hello-World.git",
-	"svn_url": "https://svn.github.com/octocat/Hello-World",
-	"mirror_url": "git://git.example.com/octocat/Hello-World",
-	"homepage": "https://github.com",
-	"language": null,
-	"forks_count": 9,
-	"stargazers_count": 80,
-	"watchers_count": 80,
-	"size": 108,
-	"default_branch": "master",
-	"open_issues_count": 0,
-	"has_issues": true,
-	"has_wiki": true,
-	"has_downloads": true,
-	"pushed_at": "2011-01-26T19:06:43Z",
-	"created_at": "2011-01-26T19:01:12Z",
-	"updated_at": "2011-01-26T19:14:43Z",
-	"permissions": {
-		"admin": false,
-		"push": false,
-		"pull": true
-	},
-	"subscribers_count": 42,
-	"organization": {
-	"login": "octocat",
-	"id": 1,
-	"avatar_url": "https://github.com/images/error/octocat_happy.gif",
-	"gravatar_id": "somehexcode",
-	"url": "https://api.github.com/users/octocat",
-	"html_url": "https://github.com/octocat",
-	"followers_url": "https://api.github.com/users/octocat/followers",
-	"following_url": "https://api.github.com/users/octocat/following{/other_user}",
-	"gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
-	"starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
-	"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
-	"organizations_url": "https://api.github.com/users/octocat/orgs",
-	"repos_url": "https://api.github.com/users/octocat/repos",
-	"events_url": "https://api.github.com/users/octocat/events{/privacy}",
-	"received_events_url": "https://api.github.com/users/octocat/received_events",
-	"type": "Organization",
-	"site_admin": false
-	},
-	"parent": {
-		"id": 1296269,
-		"owner": {
-			"login": "octocat",
-			"id": 1,
-			"avatar_url": "https://github.com/images/error/octocat_happy.gif",
-			"gravatar_id": "somehexcode",
-			"url": "https://api.github.com/users/octocat",
-			"html_url": "https://github.com/octocat",
-			"followers_url": "https://api.github.com/users/octocat/followers",
-			"following_url": "https://api.github.com/users/octocat/following{/other_user}",
-			"gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
-			"starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
-			"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
-			"organizations_url": "https://api.github.com/users/octocat/orgs",
-			"repos_url": "https://api.github.com/users/octocat/repos",
-			"events_url": "https://api.github.com/users/octocat/events{/privacy}",
-			"received_events_url": "https://api.github.com/users/octocat/received_events",
-			"type": "User",
-			"site_admin": false
-		},
-		"name": "Hello-World",
-		"full_name": "octocat/Hello-World",
-		"description": "This your first repo!",
-		"private": false,
-		"fork": true,
-		"url": "https://api.github.com/repos/octocat/Hello-World",
-		"html_url": "https://github.com/octocat/Hello-World",
-		"clone_url": "https://github.com/octocat/Hello-World.git",
-		"git_url": "git://github.com/octocat/Hello-World.git",
-		"ssh_url": "git@github.com:octocat/Hello-World.git",
-		"svn_url": "https://svn.github.com/octocat/Hello-World",
-		"mirror_url": "git://git.example.com/octocat/Hello-World",
-		"homepage": "https://github.com",
-		"language": null,
-		"forks_count": 9,
-		"stargazers_count": 80,
-		"watchers_count": 80,
-		"size": 108,
-		"default_branch": "master",
-		"open_issues_count": 0,
-		"has_issues": true,
-		"has_wiki": true,
-		"has_downloads": true,
-		"pushed_at": "2011-01-26T19:06:43Z",
-		"created_at": "2011-01-26T19:01:12Z",
-		"updated_at": "2011-01-26T19:14:43Z",
-		"permissions": {
-			"admin": false,
-			"push": false,
-			"pull": true
-		}
-	},
-	"source": {
-		"id": 1296269,
-		"owner": {
-			"login": "octocat",
-			"id": 1,
-			"avatar_url": "https://github.com/images/error/octocat_happy.gif",
-			"gravatar_id": "somehexcode",
-			"url": "https://api.github.com/users/octocat",
-			"html_url": "https://github.com/octocat",
-			"followers_url": "https://api.github.com/users/octocat/followers",
-			"following_url": "https://api.github.com/users/octocat/following{/other_user}",
-			"gists_url": "https://api.github.com/users/octocat/gists{/gist_id}",
-			"starred_url": "https://api.github.com/users/octocat/starred{/owner}{/repo}",
-			"subscriptions_url": "https://api.github.com/users/octocat/subscriptions",
-			"organizations_url": "https://api.github.com/users/octocat/orgs",
-			"repos_url": "https://api.github.com/users/octocat/repos",
-			"events_url": "https://api.github.com/users/octocat/events{/privacy}",
-			"received_events_url": "https://api.github.com/users/octocat/received_events",
-			"type": "User",
-			"site_admin": false
-		},
-		"name": "Hello-World",
-		"full_name": "octocat/Hello-World",
-		"description": "This your first repo!",
-		"private": false,
-		"fork": true,
-		"url": "https://api.github.com/repos/octocat/Hello-World",
-		"html_url": "https://github.com/octocat/Hello-World",
-		"clone_url": "https://github.com/octocat/Hello-World.git",
-		"git_url": "git://github.com/octocat/Hello-World.git",
-		"ssh_url": "git@github.com:octocat/Hello-World.git",
-		"svn_url": "https://svn.github.com/octocat/Hello-World",
-		"mirror_url": "git://git.example.com/octocat/Hello-World",
-		"homepage": "https://github.com",
-		"language": null,
-		"forks_count": 9,
-		"stargazers_count": 80,
-		"watchers_count": 80,
-		"size": 108,
-		"default_branch": "master",
-		"open_issues_count": 0,
-		"has_issues": true,
-		"has_wiki": true,
-		"has_downloads": true,
-		"pushed_at": "2011-01-26T19:06:43Z",
-		"created_at": "2011-01-26T19:01:12Z",
-		"updated_at": "2011-01-26T19:14:43Z",
-		"permissions": {
-			"admin": false,
-			"push": false,
-			"pull": true
-		}
-	}
-};
+// From the Gitlab CI sample
+// https://gitlab.com/gitlab-org/gitlab-foss/blob/master/lib/gitlab/ci/templates/Go.gitlab-ci.yml
+var sampleYaml1 = "image: golang:latest\n" +
+                  "\n" +
+                  "variables:\n" +
+                  "  # Please edit to your GitLab project\n" +
+                  "  REPO_NAME: gitlab.com/namespace/project\n" +
+                  "\n" +
+                  "# The problem is that to be able to use go get, one needs to put\n" +
+                  "# the repository in the $GOPATH. So for example if your gitlab domain\n" +
+                  "# is gitlab.com, and that your repository is namespace/project, and\n" +
+                  "# the default GOPATH being /go, then you'd need to have your\n" +
+                  "# repository in /go/src/gitlab.com/namespace/project\n" +
+                  "# Thus, making a symbolic link corrects this.\n" +
+                  "before_script:\n" +
+                  "  - mkdir -p $GOPATH/src/$(dirname $REPO_NAME)\n" +
+                  "  - ln -svf $CI_PROJECT_DIR $GOPATH/src/$REPO_NAME\n" +
+                  "  - cd $GOPATH/src/$REPO_NAME\n" +
+                  "\n" +
+                  "stages:\n" +
+                  "  - test\n" +
+                  "  - build\n" +
+                  "  - deploy\n" +
+                  "\n" +
+                  "format:\n" +
+                  "  stage: test\n" +
+                  "  script:\n" +
+                  "    - go fmt $(go list ./... | grep -v /vendor/)\n" +
+                  "    - go vet $(go list ./... | grep -v /vendor/)\n" +
+                  "    - go test -race $(go list ./... | grep -v /vendor/)\n" +
+                  "\n" +
+                  "compile:\n" +
+                  "  stage: build\n" +
+                  "  script:\n" +
+                  "    - go build -race -ldflags \"-extldflags '-static'\" -o $CI_PROJECT_DIR/mybinary\n" +
+                  "  artifacts:\n" +
+                  "    paths:\n" +
+                  "      - mybinary\n";
+              
+// From the GCP Node.js startup script sample
+var sampleYaml2 = "runtime: nodejs10\n" +
+                  "\n" +
+                  "instance_class: F2\n" +
+                  "\n" +
+                  "env_variables:\n" +
+                  "  BUCKET_NAME: \"example-gcs-bucket\"\n" +
+                  "\n" +
+                  "handlers:\n" +
+                  "- url: /stylesheets\n" +
+                  "  static_dir: stylesheets\n" +
+                  "\n" +
+                  "- url: /.*\n" +
+                  "  secure: always\n" +
+                  "  redirect_http_response_code: 301\n" +
+                  "  script: auto";
