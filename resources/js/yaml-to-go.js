@@ -16,7 +16,7 @@ function yamlToGo(s, typename)
 
 	try
 	{
-		data = YAML.parse(s.replace(/\.0/g, ".1")); // hack that forces floats to stay as floats
+		data = jsyaml.load(s.replace(/\.0/g, ".1")); // hack that forces floats to stay as floats
 		scope = data;
 	}
 	catch (e)
